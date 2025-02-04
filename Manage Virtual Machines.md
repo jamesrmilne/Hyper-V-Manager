@@ -3,6 +3,8 @@
 ## Overview
 The **Manage Virtual Machines** page in Hyper-V Manager provides an interface to monitor and control virtual machines (VMs) running on a Hyper-V host. It allows administrators to start, stop, pause, and manage resources for each VM efficiently.
 
+<img style="border: 1px solid gray;" src="https://github.com/jamesrmilne/Hyper-V-Manager/blob/main/ScreenShots/HVM%20Virtual%20Machines.png" />
+
 ## Table Breakdown
 The page displays a table with the following key details for each virtual machine:
 
