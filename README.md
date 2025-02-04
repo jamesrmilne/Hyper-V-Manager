@@ -1,8 +1,6 @@
 # Welcome to Hyper-V-Manager
 
-Hyper-V-Manager (HVM) is a light weight web UI for managing Hyper-V. 
-
-![Hyper-V Manager](https://upload.wikimedia.org/wikipedia/en/e/e0/Hyper-V_Logo.png)
+Hyper-V-Manager (HVM) is a light weight web UI for managing Hyper-V on windows desktop or server. 
 
 ## Overview
 Hyper-V-Manager is a simple web tool built into help manage Windows Hyper-V that allows you to Manage, backup, and monitor virtual machines (VMs) on Windows-based systems. It provides an intuitive interface for configuring and maintaining virtualized environments.
