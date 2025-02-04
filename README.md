@@ -8,7 +8,7 @@ Hyper-V-Manager (HVM) is a light weight web UI for managing Hyper-V.
 Hyper-V-Manager is a simple web tool built into help manage Windows Hyper-V that allows you to Manage, backup, and monitor virtual machines (VMs) on Windows-based systems. It provides an intuitive interface for configuring and maintaining virtualized environments.
 
 ## Features
-- **Manage Virtual Machines**: Easily start & stop VMs. 
+- **Manage Virtual Machines**: Easily start & stop VMs from a web browser. 
 - **Export & Archive**: Take VM exports for rollback or backup purposes. Archiving a VM with Export and Zip the VM to save storage.
 - **Storage Management**: View and Monitor the host voluumes to ensure free space does not degrade performance.
 - **Process Monitoring**: View the current processes running on the Host System. View real-time CPU, memory, and disk usage statistics.
@@ -24,16 +24,10 @@ Hyper-V Manager is included with Windows Server and Windows 10/11 Pro & Enterpri
    ```
 2. Restart your computer when prompted.
 
-### Enable Hyper-V on Windows Server
-1. Open **Server Manager** and navigate to **Add Roles and Features**.
-2. Select **Hyper-V** and follow the installation wizard.
-3. Restart your system to complete the installation.
-
 ## Getting Started
-1. Open **Hyper-V Manager** from the Start menu.
-2. Click **New > Virtual Machine** to create your first VM.
-3. Configure CPU, memory, and disk settings.
-4. Install an operating system on the VM and start using it!
+1. Simply download **Hyper-V-Manager-Web.ps1**.
+2. Run **Hyper-V-Manager-Web.ps1** as Administrator.
+3. Open a web browser and connect to localhost port 80 or 443.
 
 ## Useful Links
 - [Microsoft Hyper-V Documentation](https://docs.microsoft.com/en-us/virtualization/hyper-v/)
