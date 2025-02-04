@@ -3,6 +3,8 @@
 ## Overview
 The **Process Monitoring** page in Hyper-V Manager provides a real-time view of currently running processes on the system. It allows administrators to track resource usage and identify processes that may be consuming excessive memory or CPU resources.
 
+<img style="border: 1px solid gray;" src="https://github.com/jamesrmilne/Hyper-V-Manager/blob/main/ScreenShots/HVM%20Running%20Processes.png" />
+
 ## Process Information
 The following details are displayed for each running process:
 
