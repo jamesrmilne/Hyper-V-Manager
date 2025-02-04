@@ -6,8 +6,12 @@ The **Export and Archive** functionality in Hyper-V Manager allows administrator
 ## Export
 The **Export** feature allows you to create a backup of a VM by saving all its files, including VHDX files, configuration settings, and snapshots, to a designated folder. The exported files retain their original format, making it easy to restore or migrate the VM later. The exported VM is stored in the `$BasePath\Export` directory, automatically created if it does not exist.
 
+<img style="border: 1px solid gray;" src="https://github.com/jamesrmilne/Hyper-V-Manager/blob/main/ScreenShots/HVM%20Export%20Folder.png" />
+
 ## Archive
 The **Archive** feature builds upon the Export function by compressing the exported VM files into a single ZIP archive. This helps reduce storage space and is useful for long-term retention of VM backups. Once a VM is exported, it is automatically zipped and stored in the `$BasePath\Archive` directory. This ensures efficient space management and keeps backup files organized.
+
+<img style="border: 1px solid gray;" src="https://github.com/jamesrmilne/Hyper-V-Manager/blob/main/ScreenShots/HVM%20Archive%20Folder.png" />
 
 ## Folder Structure
 Both **Export** and **Archive** folders are automatically created based on the `$BasePath` variable, ensuring organized storage of exported and archived VMs.
