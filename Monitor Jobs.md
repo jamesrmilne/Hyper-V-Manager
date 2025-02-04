@@ -3,6 +3,8 @@
 ## Overview
 The **Monitor Jobs** page in Hyper-V Manager provides a real-time view of ongoing, completed, failed, and stopped tasks. This feature helps administrators track job execution statuses and identify any issues in the virtualization environment.
 
+<img style="border: 1px solid gray;" src="https://github.com/jamesrmilne/Hyper-V-Manager/blob/main/ScreenShots/HVM%20Jobs.png" />
+
 ## Job Status Categories
 The monitoring system classifies jobs into four categories:
 
