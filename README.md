@@ -7,7 +7,7 @@ Hyper-V-Manager is a simple web tool built into help manage Windows Hyper-V that
 
 ## Features
 - **Manage Virtual Machines**: Easily start & stop VMs from a web browser.
-- **[[Manage Virtual Machines]](Manage Virtual Machines.md)**: Easily start & stop VMs from a web browser. 
+- ** [[Manage Virtual Machines]](Manage Virtual Machines.md) **: Easily start & stop VMs from a web browser. 
 - **Export & Archive**: Take VM exports for rollback or backup purposes. Archiving a VM with Export and Zip the VM to save storage.
 - **Storage Management**: View and Monitor the host voluumes to ensure free space does not degrade performance.
 - **Process Monitoring**: View the current processes running on the Host System. View real-time CPU, memory, and disk usage statistics.
