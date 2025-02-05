@@ -14,20 +14,15 @@ Hyper-V-Manager is a simple web tool built into help manage Windows Hyper-V that
 - [Process Monitoring](./Process%20Monitoring.md): View the current processes running on the Host System. View real-time CPU, memory, and disk usage statistics.
 - [Running Jobs](./Monitor%20Jobs.md): Administer Hyper-V servers remotely via Hyper-V Manager or PowerShell.
 
-## Installation
-Hyper-V Manager is included with Windows Server and Windows 10/11 Pro & Enterprise. To enable it:
+## Installation of Hyper-V-Manager
+Hyper-V is included with Windows Server and Windows 10/11 Pro & Enterprise. To enable it:
 
-### Enable Hyper-V on Windows 10/11
-1. Open **PowerShell** as Administrator and run:
-   ```powershell
-   Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
-   ```
-2. Restart your computer when prompted.
 
 ## Getting Started
 1. Simply download **Hyper-V-Manager-Web.ps1**.
-2. Run **Hyper-V-Manager-Web.ps1** as Administrator.
-3. Open a web browser and connect to localhost port 80 or 443.
+2. Run [Hyper-V-Manager-Web.ps1](https://github.com/jamesrmilne/Hyper-V-Manager/blob/main/src/Hyper-V-Manager-Web.ps1) as Administrator.
+3. Open a web browser and connect to http://localhost
+   Note: port 80 and 443 are used. A self-signed certificate is generated for SSL traffic.
 
 ## Useful Links
 - [Microsoft Hyper-V Documentation](https://docs.microsoft.com/en-us/virtualization/hyper-v/)
