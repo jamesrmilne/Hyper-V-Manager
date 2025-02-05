@@ -37,7 +37,7 @@ Write-host "$appName `n`n" -ForegroundColor White
 # Start Runtime Variables
 #
 $redirectToJobs=$false 		# Set this to true to redirect to /job/list when a export/archive is submitted
-$ClobberZips=$false # Set this to $true to overwrite
+$ClobberZips=$false 		# Set this to $true to overwrite
 $BasePath="C:\temp"
 
 #
