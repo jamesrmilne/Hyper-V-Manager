@@ -1,14 +1,17 @@
 #Requires -RunAsAdministrator
 # 
 
-$appName="Hyper-V-Manager Web Edition (Alpha) 2025"
+$appName="Hyper-V-Manager Web UI (Alpha)"
+
 # This is a lightweigh web application that can be used to manage the Services and 
 # Virtual Machines running the local server. This web application has been implemented
 # as a single page web application that can be run as a app or service.
+#
+# https://github.com/jamesrmilne/Hyper-V-Manager/
+#
+# V1.0: 2025-02-06 - Created by James Milne
 
 $colors = [enum]::GetValues([System.ConsoleColor])
-
-
 $banner = @'
   _   _                         __     __  
  | | | |_   _ _ __   ___ _ __   \ \   / /  
@@ -30,23 +33,24 @@ for ($i = 0; $i -lt $lines.Length; $i++) {
     $color = $colors[($colors.Length-1 - $i) % $colors.Length]
     Write-Host $lines[$i] -ForegroundColor $color
 }
-Write-host "$appName `n`n" -ForegroundColor White
+Write-host "$appName `n" -ForegroundColor White
 
 
 #
 # Start Runtime Variables
 #
+$skipPreflightChecks=$true	# Skip the firewall checks, etc.
 $redirectToJobs=$false 		# Set this to true to redirect to /job/list when a export/archive is submitted
-$ClobberZips=$false # Set this to $true to overwrite
+$clobberZips=$false 		# Set this to $true to overwrite zips in the archive folder
 $BasePath="C:\temp"
 
 #
 # Verify and create local folders
 #
 
-Write-Host "Base configuration:" -ForegroundColor Green
+Write-Host "Base configuration:" 
 If(Test-Path $BasePath -PathType Container) {
-    Write-Host "`tBase Path set to: [$BasePath].." -ForegroundColor Green
+    Write-Host "`tBase Path set to: [$BasePath].." 
 } else {
     Write-Host "`tCreating Base Path: [$BasePath].." -ForegroundColor Yellow
     New-Item -Path "$BasePath" -ItemType "directory" -ErrorAction SilentlyContinue | Out-Null
@@ -54,7 +58,7 @@ If(Test-Path $BasePath -PathType Container) {
 
 $ExportPath="$BasePath\Export\"
 If(Test-Path $ExportPath -PathType Container) {
-    Write-Host "`tExport Path set to: [$ExportPath].." -ForegroundColor Green
+    Write-Host "`tExport Path set to: [$ExportPath].." 
 } else {
     Write-Host "`tCreating Export Path: [$ExportPath].." -ForegroundColor Yellow
     New-Item -Path "$ExportPath" -ItemType "directory" -ErrorAction SilentlyContinue | Out-null
@@ -62,7 +66,7 @@ If(Test-Path $ExportPath -PathType Container) {
 
 $ArchivePath="$BasePath\Archive\"
 If(Test-Path $ArchivePath -PathType Container) {
-    Write-Host "`tArchive Path set to: [$ArchivePath].." -ForegroundColor Green
+    Write-Host "`tArchive Path set to: [$ArchivePath].." 
 } else {
     Write-Host "`tCreating Archive Path: [$ArchivePath].." -ForegroundColor Yellow
     New-Item -Path "$ArchivePath" -ItemType "directory" -ErrorAction SilentlyContinue | Out-null
@@ -96,24 +100,92 @@ Add-Type -TypeDefinition @"
 # Setup a Secure Connection using https
 #
 # Find the "Hyper-V-Manager" Certificate Thumbprint
-$Thumbprint = (Get-ChildItem -Path Cert:\LocalMachine\Root -Recurse | Where-Object {$_.FriendlyName -match "Hyper-V-Manager"}).Thumbprint;
+$certificateName="Hyper-V-Manager"
+$Thumbprint = (Get-ChildItem -Path Cert:\LocalMachine\Root -Recurse | Where-Object {$_.FriendlyName -match $certificateName}).Thumbprint;
 if($Thumbprint.Length -gt 0) {
-    Write-Host "`tLoading certificate thumbprint: [$Thumbprint].." -ForegroundColor Green
+    Write-Host "`tLoading certificate name: [$certificateName] thumbprint: [$Thumbprint].." 
 } else {
     $computername = $($ENV:COMPUTERNAME).ToLower()
-    $newCert = New-SelfSignedCertificate -DnsName "$computername","localhost" -CertStoreLocation cert:\LocalMachine\My -NotAfter (Get-Date).AddYears(10) -FriendlyName "Hyper-V-Manager"
+    $newCert = New-SelfSignedCertificate -DnsName "$computername","localhost" -CertStoreLocation cert:\LocalMachine\My -NotAfter (Get-Date).AddYears(10) -FriendlyName $certificateName
     $thumbprint=$newCert.Thumbprint
-    Write-Host "`tGenerating new certificate thumbprint: [$Thumbprint].." -ForegroundColor Green
+    Write-Host "`tGenerating new certificate with certificate name: [$certificateName] thumbprint: [$Thumbprint].."
     Move-Item $newCert.pspath Cert:\LocalMachine\Root\
-
 }
 $guid = [guid]::NewGuid().toString()
 Remove-NetIPHttpsCertBinding
 Add-NetIPHttpsCertBinding -IpPort "0.0.0.0:443" -ApplicationId "{$guid}" -CertificateHash "$Thumbprint" -CertificateStoreName "Root" -NullEncryption $false
 
 # Define the URL and port for the server
-$listener = New-Object System.Net.HttpListener
 $prefixes = @("http://*:80/", "https://*:443/")
+
+# Firewall checks
+if (-not $skipPreflightChecks) {
+	Write-Host "`nPreflight checks.."
+
+	# Extract ports dynamically
+	$ports = $prefixes -match ':\d+' | ForEach-Object { ($_ -split ':')[-1] -replace '/','' }
+
+	# Get the current active network profiles
+	$networkProfiles = Get-NetConnectionProfile
+
+	# Get firewall status for all profiles
+	$firewallProfiles = Get-NetFirewallProfile | Select-Object Name, Enabled
+
+	# Check if the extracted ports are open for inbound traffic
+	$openPorts = @{}
+	$closedPorts = @()
+	foreach ($port in $ports) {
+		$rule = Get-NetFirewallRule | Where-Object {
+			$_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound'
+		} | Get-NetFirewallPortFilter | Where-Object { $_.LocalPort -eq $port }
+
+		if ($rule) {
+			$openPorts[$port] = "Open"
+		} else {
+			$openPorts[$port] = "Closed"
+			$closedPorts += $port
+		}
+	}
+
+	# Output firewall status
+	Write-Host "`nWindows Firewall Status:"
+	$firewallProfiles | ForEach-Object { Write-Host "`t$($_.Name): $($_.Enabled)" }
+
+	Write-Host "`nPort Status:"
+	foreach ($port in $ports) {
+		Write-Host "`tPort $port - $($openPorts[$port])"
+	}
+
+	# Check if any active network profile has the firewall disabled
+	$activeFirewallDisabled = $false
+	foreach ($profile in $networkProfiles) {
+		$profileName = $profile.NetworkCategory
+		$interfaceName = $profile.InterfaceAlias
+		$firewallStatus = $firewallProfiles | Where-Object { $_.Name -eq $profileName } | Select-Object -ExpandProperty Enabled
+
+		if ($firewallStatus -eq $false) {
+			$activeFirewallDisabled = $true
+			Write-Host "`nNOTE: The firewall is disabled for your active network profile ($profileName) on adapter '$interfaceName'." -ForegroundColor Yellow
+		}
+	}
+
+	# Determine accessibility message
+	if (-not $activeFirewallDisabled) {
+		if ($closedPorts.Count -eq $ports.Count) {
+			Write-Host "`nThe Hyper-V-Management Web UI will only be accessible from the localhost." -ForegroundColor Green
+		} else {
+			Write-Host "`nThe Hyper-V-Management Web UI will be accessible from other machines on the network." -ForegroundColor Yellow
+		}
+	} else {
+		Write-Output "`nThe Hyper-V-Management Web UI may be accessible from other machines on the network since the firewall is disabled." -ForegroundColor Yellow
+	}
+} # Preflight Checks
+
+
+#
+# HTTP listener
+#
+$listener = New-Object System.Net.HttpListener
 
 ForEach ( $prefix in $prefixes)
 {
@@ -129,7 +201,7 @@ $listener.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::Integrated
 #
 try {
 	$listener.Start()
-	$listener.Prefixes
+	#$listener.Prefixes
 } 
 catch {
 	
@@ -139,7 +211,7 @@ catch {
 	Exit(1)
 }
 
-Write-Host "Server is running. Press <CTRL-C> to stop." -NoNewline
+Write-Host "`nServer is running. Press <CTRL-C> to stop." -NoNewline
 
 # Define the function to handle incoming requests
 function Handle-Request {
@@ -168,13 +240,25 @@ $JobIcon=@"
 #
 $favicon="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Gv+NMxr/mkw2/+bc2f+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/9nEvv/y47r/66oB/+uqAf/uxFf/9PDk//Pw5P/18eX/9PDk//Tw5P/29PH/9fX1/7F2Zf+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+ZSzX/5tzZ/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/2cS+//Ljuv/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB//Lcof/19fX/sXZm/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/5lLNf/m3Nn/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv/ZxL7/8eK5/+uqAf/rqgH/7bs6//LdpP/x3KT/9N6m//LcpP/x3KT/9O3Z//X19f+xdWX/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/mUkz/+fd2v+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/9rFv//w4bj/66oB/+uqAf/tvkT/8+XC//Tmw//x5MD/8+bC//Pmwv/z7+P/9fX1/8Wek/+wdGP/rXFg/65yYf+wdGP/rXFg/65yYv+2gHH/7ebj/61uXP+tbl3/q2xb/61uXf+tbl3/q2xb/61uXf+tblz/q2xb/61uXf+sbVz/5NXR//Dhuf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB//Hgsf/29vb/0LCn/8GThv/BlIf/wZSH/8GThv/BlIf/wZOH/8eglf/u6ef/wZaK/8GWiv/Cl4v/wZaK/8GWiv/Cl4v/wZaK/8GWiv/Cl4v/wZaK/8GXi//r4+D/8OG4/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/8eG0//X19f+oZVP/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/mUs2/+bY1P+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/9vGwP/x4rn/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/y4bT/9fX1/6hmU/+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+aTDb/5djT/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/2sW///Ljuv/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB//LitP/19fX/qGZU/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/5pMNv/k1tL/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv/ZxL7/8uO6/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/8uK0//X19f+oZlT/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/mkw2/+TX0/+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/9nEvv/y47r/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/z4rX/9fX1/7aAcv+WRC3/jTQb/40zGv+NMxr/jTMa/40zGv+aTDb/5NfT/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/2cS+//Liuv/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB//Lhs//19fX/9fX1//X19f/z8fD/6d7b/9/Mx//Sta3/yaOY/8eek//r4+H/p2NR/51RO/+SPSX/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv/axb7/8eG5/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/664N/+y3K//uwEb/7cZg//DRfv/x2Zj/8N+y//Xr0P/08en/9PT0//b29v/19fX/9fX1//X19f/w7Ov/5tnV/9vFv//Rsqn/xp6T/7qJe/+yd2f/pmJP/+LRzP/x4bn/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+qqAf/rrxL/7cVc//X19f/19fX/9vb2//X19f/19fX/9vb2//X19f/19fX/9vb2//T09P/19fX/9fX1//Dhuf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/suzr/9fX1//X19f/29vb/9fX1//X19f/29vb/9fX1//X19f/29vb/9fX1//X19f/29vb/8eG5/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+28Ov/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//b29v/19fX/9fX1//X19f/z47r/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7bw7//X19f/29vb/9PT0//X19f/19fX/9PT0//b29v/19fX/9fX1//b29v/19fX/9PT0//Ljuv/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/tvDv/9fX1//X19f/09PT/9fX1//X19f/09PT/9fX1//X19f/19fX/9fX1//X19f/09PT/8uO6/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+28Ov/19fX/9fX1//T09P/19fX/9fX1//T09P/19fX/9fX1//X19f/19fX/9fX1//T09P/y47r/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7bw6//X19f/19fX/9PT0//X19f/29vb/9PT0//X19f/19fX/9fX1//b29v/19fX/9fX1//DhuP/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/suzr/9fX1//X19f/29vb/9fX1//X19f/29vb/9fX1//X19f/29vb/9PT0//X19f/29vb/8OG4/+uqAf/rqgH/7cBI//PozP/06c3/8efK//Ppzf/z6c3/8efK//Tpzf/z6Mz/8efL//Tpzf/z6Mz/8efK//PmxP/qqgH/66oB/+28Ov/19fX/9PT0//b29v/19fX/9fX1//b29v/09PT/9fX1//b29v/09PT/9fX1//b29v/w4bj/66oB/+uqAf/tuTP/8NaS//DWkv/x1pL/8NaS//DWkv/x1pL/8NaS//DWkv/x15L/8NaS//DWkv/x1pL/79SL/+uqAf/rqgH/7Ls6//X19f/19fX/9vb2//X19f/19fX/9vb2//X19f/19fX/9vb2//X19f/19fX/9fX1//Hhuf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/tvDr/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/29vb/9fX1//X19f/29vb/8uO6/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+28Ov/19fX/9vb2//T09P/19fX/9fX1//T09P/29vb/9fX1//X19f/29vb/9fX1//T09P/z58X/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7b5B//X19f/29vb/9fX1//X19f/19fX/9fX1//b29v/19fX/9fX1//b29v/19fX/9PT0//X19P/uzHT/7bcr/+uzIv/rtCP/67Qj/+uzIv/rtCP/67Qj/+uzIv/rtCP/67Qj/+uzIv/rtCP/67Mi/+qzIv/rtCP/67Qj/+2+QP/x47//9fX1//X19f/09PT/9fX1//X19f/09PT/9fX1//X19f/19fX/9fX1//X19f/09PT/9vb2//X19f/09PT/9vb2//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9vb2//T09P/19fX/9vb2//X19f/19fX/9vb2//X19f/19fX/9vb2//T09P/19fX/9fX1//T09P/29vb/9fX1//X19f/29vb/9fX1//X19f8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKAAAADAAAABgAAAAAQAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPHx8f/39/f/8/Pz//X19f/29vb/9PT0//j4+P/z8/P/+Pj4//Pz8//39/f/9PT0//T09P/39/f/8/Pz//j4+P/z8/P/+Pj4//T09P/29vb/9fX1//Pz8//39/f/8fHx//n5+f/z8/P/+Pj4//X19f/19fX/9/f3//Ly8v/4+Pj/8vLy//j4+P/09PT/9vb2//b29v/09PT/+Pj4//Ly8v/4+Pj/8vLy//f39//19fX/9fX1//j4+P/z8/P/+fn5//b29v/09PT/9vb2//X19f/19fX/9vb2//T09P/29vb/9PT0//b29v/19fX/9vb2//b29v/19fX/9vb2//T09P/29vb/9PT0//b29v/19fX/9fX1//b29v/09PT/9vb2//T09P/29vb/9PT0//X19f/19fX/9fX1//b29v/09PT/9vb2//X19f/29vb/9fX1//X19f/29vb/9fX1//b29v/09PT/9vb2//X19f/19fX/9fX1//T09P/19PT/9PT0//Px6v/y2Zf/7stt//DMb//wzG//78tu//HNcP/uym3/8c1w/+7Lbf/wzG//78tu/+/Lbv/wzG//7stt//HOcP/uy23/8c1w/+/Lbv/vzHH/79KC//Danf/y47n/8+zZ//f39//09PT/9vb2//X19f/19fX/9vb2//T09P/29vb/9PT0//b29v/19fX/9vb2//b29v/19fX/9/b2//Ht7P/n2tb/1r63/82qoP/AkoX/s3tr/6hmU/+0fm//7+nn//bx4//tvUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rrQ7/7MFP//HQdv/w1pL/8t+w//Pqzv/08en/9fX1//f39//09PT/9/f3//Pz8//29fX/8e/v//Ds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Gv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+nZVP/8uro//jz5v/tvkD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/uvTv/9/Hi//Ly8v/eycP/lkQu/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/5E8JP/Nq6L/18G6/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+lY1D/6OHf//Pu4P/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/tvDr/8+7e//b29v/cxsH/lkQt/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/5E7I//OraT/28S+/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+mZFL/7ebk//Tv4f/svUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/tvDr/9O/f//X19f/cx8H/lkQt/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/5E7I//NraP/2sS9/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+mZFH/7OXj//Pu4P/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/tvDr/9O7f//b29v/dysT/m045/5E6Iv+ONR3/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/5E7I//OraT/28S+/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+nZFL/7ubk//Pu4P/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/tuzr/8+3e//b29v/t5+b/2b63/8qnnf/FnJD/vo6B/7V/cP+xdWT/p2VT/6JaRv+aSzb/kz4n/5E8Jf/OraT/28W+/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+mZFH/7ebk//n05//tvkH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/uvDn/9/Hi//Hx8f/4+Pj/8fHx//f39//19fX/9PPy//Xy8v/s5+b/8uvp/+Xc2f/s4N3/4dTQ/+PTzv/t5eP/6eLg/72Lff+ucWH/pWBN/5hJM/+POB//jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+NMxr/jTMa/40zGv+lYlD/5+De//Dr3f/ruz7/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqwP/7LMg/+29QP/txVz/8dJ9/+/Ymf/z47n/8+nM//Do0f/38N7/8Ovc//n16//y8Or/+Pf1//X19f/09PT/9/f3//Lx8v/4+Pj/8vLy//j4+P/y8fD/7OPg/+DNyP/Sta3/yaKY/7qJfP+vdGT/pF5L/5xRPP+bTTf/mEgy/5ZDLf+ucF//8evp//Xw4v/svUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/6qwJ/+uxGf/tuCz/7b0+/+7CUP/vyWP/7sx0//HUiP/x2Zr/8efL//b29v/19fX/9vb2//T09P/19fX/9fX1//X19f/19fX/9PT0//b29v/19fX/9vb2//Hu7f/r4t//49PP/9vGv//fzMf/8vDv//Tu4f/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+urBf/rrQv/7sts//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//Xw4v/svUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7shh//b29v/09PT/9vb2//X19f/19fX/9fX1//X19f/19fX/9fX1//b29v/09PT/9vb2//X19f/19fX/9fX1//T09P/19fX/9PT0//Xw4v/tvUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7shh//b29v/09PT/9vb2//T09P/19fX/9fX1//X19f/19fX/9PT0//b29v/09PT/9vb2//X19f/19fX/9fX1//T09P/29vb/9PT0/+/p3P/ruz7/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7cZf//Hx8f/4+Pj/8fHx//j4+P/09PT/9vb2//b29v/09PT/+Pj4//Hx8f/4+Pj/8fHx//f39//19fX/9fX1//n5+f/y8vL/+vr6//n05v/uvUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/78li//n5+f/z8/P/+vr6//Ly8v/39/f/9PT0//T09P/39/f/8vLy//r6+v/z8/P/+fn5//T09P/29vb/9fX1//Ly8v/4+Pj/8fHx//Pu4P/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7cdh//T09P/29vb/9PT0//b29v/09PT/9fX1//X19f/09PT/9vb2//T09P/29vb/9PT0//b29v/19fX/9fX1//b29v/09PT/9vb2//Tv4f/svUD/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7shh//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//Pu4P/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7sdg//T09P/29vb/9PT0//X19f/19fX/9fX1//X19f/19fX/9fX1//T09P/29vb/9PT0//b29v/19fX/9fX1//b29v/19fX/9vb2//Pu4f/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7chg//T09P/29vb/9PT0//X19f/19fX/9fX1//b29v/19fX/9fX1//T09P/29vb/9PT0//b29v/19fX/9fX1//b29v/09PT/9vb2//r05//tvkH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/78li//r6+v/y8vL/+vr6//Ly8v/39/f/9PT0//T09P/39/f/8vLy//r6+v/y8vL/+vr6//Pz8//29vb/9vb2//Hx8f/4+Pj/8PDw/+/p3P/ruz7/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7MZg//Hx8f/4+Pj/8fHx//n5+f/09PT/9vb2//b29v/09PT/+fn5//Hx8f/4+Pj/8fHx//f39//19fX/9fX1//n5+f/y8vL/+vr6//Xw4v/svD//66oB/+uqAf/rqgH/7bkw//DFVP/swVD/8MVU/+zBUP/uw1P/7cJR/+3CUf/uw1P/7MFQ//DFVP/swVD/8MVU/+3CUf/uw1L/7sNS/+zBUP/vxFP/68BQ//DFU//stSb/66oB/+uqAf/rqgH/7shh//b29v/09PT/9vb2//X19f/29vb/9fX1//X19f/29vb/9fX1//b29v/09PT/9vb2//X19f/19fX/9fX1//T09P/29vb/9PT0//Pu4f/svD//66oB/+uqAf/rqgH/8NOG//Xx6P/08Of/9fHo//Tw5//08ef/9PHn//Tx5//08ef/9PDn//Xx6P/08Of/9fHo//Tw5//08ef/9PHn//Tw5//18ej/8/Dm//Xw5P/uyWn/66oB/+uqAf/rqgH/7shh//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//X19f/19fX/9fX1//Xw4v/svUD/66oB/+uqAf/rqgH/7897//Lq0//17NX/8urT//Tr1P/z6tP/9OvU//Tr1P/z6tP/9OvU//Lq0//17NX/8urT//Ts1f/z69T/9OvU//Ts1f/z6tP/9ezV//Loz//tx2D/66oB/+uqAf/rqgH/7shh//b29v/19fX/9vb2//X19f/19fX/9fX1//X19f/19fX/9fX1//b29v/19fX/9vb2//X19f/19fX/9fX1//T09P/19fX/9PT0//Xw4v/svT//66oB/+uqAf/rqgH/664O/+yxGP/rsBf/7LEY/+uwF//ssRj/7LEY/+yxGP/ssRj/67AX/+yxGP/rsBj/7LEY/+uxGP/rsRj/7LEY/+uwGP/ssRj/67AX/+yxGP/rrQv/66oB/+uqAf/rqgH/7shh//b29v/09PT/9vb2//T09P/19fX/9fX1//X19f/19fX/9PT0//b29v/09PT/9vb2//X19f/19fX/9fX1//T09P/29vb/9PT0/+/p3P/ruz7/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7cZf//Hx8f/4+Pj/8fHx//j4+P/09PT/9vb2//f39//09PT/+Pj4//Hx8f/4+Pj/8fHx//f39//19fX/9fX1//n5+f/y8vL/+vr6//r05//tvkH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/78li//r6+v/y8vL/+vr6//Ly8v/39/f/9PT0//T09P/39/f/8vLy//r6+v/y8vL/+vr6//Pz8//29vb/9vb2//Hx8f/4+Pj/8PDw//Pu4P/svD//66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7shg//T09P/29vb/9PT0//b29v/19fX/9fX1//X19f/19fX/9vb2//T09P/29vb/9PT0//b29v/19fX/9fX1//b29v/09PT/9vb2//Tx5//uw1H/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/66oB/+uqAf/rqgH/7810//X19f/29vb/9fX1//b29v/19fX/9fX1//X19f/19fX/9vb2//X19f/29vb/9fX1//b29v/19fX/9fX1//X19f/19fX/9fX1//X19P/w3Kf/7LUn/+yvEf/rrQ3/660M/+utDf/rrQz/660N/+utDP/rrQz/660M/+utDP/rrQz/660M/+utDf/rrQz/660N/+utDP/rrQz/660M/+utDP/rrQz/660M/+utDf/rrQz/664N/+ywE//sujf/8+rS//T09P/19fX/9PT0//X19f/19fX/9fX1//X19f/19fX/9fX1//T09P/19fX/9PT0//b29v/19fX/9fX1//b29v/19fX/9vb2//T09P/19fT/8ejQ//Leqv/x2p7/79ib//Pcn//u15r/89yg/+7Xmv/x2p3/79ic/+/YnP/x2p3/7tea//PcoP/u15r/89yf/+/Ym//w2Z3/8Nmd/+7Wmv/y257/7daZ//TdoP/u15v/89yg//LgsP/z7d3/9vX1//T09P/29vb/9PT0//X19f/19fX/9fX1//X19f/19fX/9fX1//T09P/29vb/9PT0//b29v/19fX/9fX1//b29v/09PT/9vb2//r6+v/y8vL/+fn5//X19f/19fX/9/f3//Hx8f/5+fn/8fHx//j4+P/09PT/9/f3//b29v/09PT/+Pj4//Hx8f/5+fn/8fHx//f39//19fX/9fX1//n5+f/y8vL/+vr6//Dw8P/4+Pj/8fHx//b29v/29vb/8/Pz//r6+v/y8vL/+vr6//Ly8v/39/f/9PT0//T09P/39/f/8vLy//r6+v/y8vL/+vr6//Pz8//29vb/9vb2//Hx8f/4+Pj/8PDw/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
 #
-# Action Icons
+# Start General Icons
 #
 $PlayIcon = @"
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;"><path d="M7 6v12l10-6z"></path></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;">
+  <title>Start VM</title>
+  <!-- Play triangle -->
+  <path d="M7 6v12l10-6z"></path>
+</svg>
 "@
 $ExportIcon = @"
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;"><path d="M18 22a2 2 0 0 0 2-2v-5l-5 4v-3H8v-2h7v-3l5 4V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12zM13 4l5 5h-5V4z"></path></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;">
+  <title>Export VM</title>
+  <!-- Document Shape -->
+  <path d="M6 2C5.4 2 5 2.4 5 3V21C5 21.6 5.4 22 6 22H18C18.6 22 19 21.6 19 21V8L14 2H6Z"></path>
+  <!-- Folded Corner -->
+  <path d="M14 2V8H19L14 2Z"></path>
+  <!-- Right Arrow on Document -->
+  <path d="M9 10l4 3-4 3" stroke="blue" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
 "@
 $CheckpointIcon = @"
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;">
@@ -200,15 +284,21 @@ $PauseIcon = @"
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;"><path d="M8 7h3v10H8zm5 0h3v10h-3z"></path></svg>
 "@
 $OptimizeIcon = @"
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;"><path d="m21.224 15.543-.813-1.464-1.748.972.812 1.461c.048.085.082.173.104.264a1.024 1.024 0 0 1-.014.5.988.988 0 0 1-.104.235 1 1 0 0 1-.347.352.978.978 0 0 1-.513.137H14v-2l-4 3 4 3v-2h4.601c.278 0 .552-.037.811-.109a2.948 2.948 0 0 0 1.319-.776c.178-.179.332-.38.456-.593a2.992 2.992 0 0 0 .336-2.215 3.163 3.163 0 0 0-.299-.764zM5.862 11.039l-2.31 4.62a3.06 3.06 0 0 0-.261.755 2.997 2.997 0 0 0 .851 2.735c.178.174.376.326.595.453A3.022 3.022 0 0 0 6.236 20H8v-2H6.236a1.016 1.016 0 0 1-.5-.13.974.974 0 0 1-.353-.349 1 1 0 0 1-.149-.468.933.933 0 0 1 .018-.245c.018-.087.048-.173.089-.256l2.256-4.512 1.599.923L8.598 8 4 9.964l1.862 1.075zm12.736 1.925L19.196 8l-1.638.945-2.843-5.117a2.95 2.95 0 0 0-1.913-1.459 3.227 3.227 0 0 0-.772-.083 3.003 3.003 0 0 0-1.498.433A2.967 2.967 0 0 0 9.41 3.944l-.732 1.464 1.789.895.732-1.465c.045-.09.101-.171.166-.242a.933.933 0 0 1 .443-.27 1.053 1.053 0 0 1 .53-.011.963.963 0 0 1 .63.485l2.858 5.146L14 11l4.598 1.964z"></path></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill: rgba(255, 255, 255, 1);transform: ;msFilter:;">
+  <title>Optimize VM</title>
+  <!-- Horizontal Line -->
+  <line x1="4" y1="12" x2="20" y2="12" stroke="white" stroke-width="2"></line>
+  <!-- Downward Arrow (Above the Line, Pointing Towards) -->
+  <polygon points="9,7 12,11 15,7" fill="white"></polygon>
+  <!-- Upward Arrow (Below the Line, Pointing Towards) -->
+  <polygon points="9,17 12,13 15,17" fill="white"></polygon>
+</svg>
 "@
 $ArchiveIcon = @"
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   <title>Archive VM to Zip</title>
-
   <!-- File Shape (White) -->
   <path d="M6 2C5.4 2 5 2.4 5 3V21C5 21.6 5.4 22 6 22H18C18.6 22 19 21.6 19 21V7L14 2H6Z" fill="white"></path>
-
   <!-- Rotated ZIP Text (Transparent Cutout) -->
   <text x="15" y="15" font-family="Arial, sans-serif" font-size="5" font-weight="bold" fill="orange" transform="rotate(90,16,8)">ZIP ></text>
 </svg>
@@ -219,6 +309,7 @@ $ArchiveIcon = @"
 #
 # HTML Fragments
 #
+# Banner Menu
 $htmlMenu=@"
 	<nav>
 		<a href="/" class="home" alt="Home"><i class="home"></i></a>
@@ -228,8 +319,8 @@ $htmlMenu=@"
 		<a href="/process/list/" class="process" alt="Process"><i class="process"></i></a>
 		<a href="/job/list/" class="job" alt="Manage Jobs"><i class="job"></i></a>
 	</nav>
-
 "@
+# HTML Page Head
 $htmlHead = @"
 	<html><head><title>[TITLE]</title>
 	<meta http-equiv="refresh" content="600" >
@@ -428,8 +519,10 @@ $htmlHead = @"
 	<body>
 
 "@
+# Add HTML Banner Menu to HTML Head
 $htmlHead+=$htmlMenu
 
+# HTML for Home Page
 $htmlHomePage=@"
 <div class="tile vm">
 <a href="/vm/list/">
@@ -473,6 +566,7 @@ $htmlHomePage=@"
 
 "@
 
+# HTML for Volume Tile
 $htmlDrive=@"
 <div class="tile volumes [Status]">
 <a href="/volumes/list/">
@@ -481,10 +575,9 @@ $htmlDrive=@"
  <div class="tile_description"><p>View Volumes..</p></div>
  </a>
  </div>
- 
 "@
 
-# Virtual Machines Header
+# Virtual Machines Table Header
 $htmlVirtualMachines=@"
 					<h1>Hyper-V Virtual Machines</h1>
 					<table>  
